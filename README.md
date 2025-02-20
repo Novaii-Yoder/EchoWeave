@@ -1,10 +1,10 @@
+~~~
   _____     _        __        __                   
  | ____|___| |__   __\ \      / /__  __ ___   _____ 
  |  _| / __| '_ \ / _ \ \ /\ / / _ \/ _` \ \ / / _ \
  | |__| (__| | | | (_) \ V  V /  __/ (_| |\ V /  __/
  |_____\___|_| |_|\___/ \_/\_/ \___|\__,_| \_/ \___|
-
-
+~~~
  A all-in-one Knowledge Graph option for storing and retrieving textual data while keeping symantic connections.
 
  EchoWeave is a continuation of a research project that can be found on my GitHub conducted as part of my Master's degree at NMSU. I wanted to flesh out the idea and build a knowledge graph tool that could be used on hopefully larger graphs and constantly updating sources.
