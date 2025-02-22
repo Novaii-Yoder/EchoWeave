@@ -1,7 +1,7 @@
 from echo_weave import EchoWeave
 import os
 
-apikey_file = "../serviceaccount.apikey"
+apikey_file = "../../serviceaccount.apikey"
 
 file = open(apikey_file, 'r')
 apikey = file.read().strip()
