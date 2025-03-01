@@ -34,6 +34,6 @@ class GPT_Client:
 
     def rag_query(self, query, docs, subgraph):
         system_message = "You are a helpful assistant that uses the context given to answer the question. If you are unsure say there is not enough information provided."
-        user_message = query + " Given the document chunks: " + docs + " And the the relationship graph: " + subgraph
+        user_message = "Given the document chunks: ".join([str(c) for c in docs]) + " And the the relationship graph: " + subgraph + " " + query
         return self.client.gpt_call(system_message, user_message)
 

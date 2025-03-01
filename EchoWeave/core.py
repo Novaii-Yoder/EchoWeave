@@ -1,10 +1,10 @@
 from transformers import GPT2TokenizerFast # type: ignore
 from langchain_community.document_loaders import PyPDFLoader # type: ignore
 from langchain.text_splitter import RecursiveCharacterTextSplitter # type: ignore
-#from langchain_community.embeddings import OpenAIEmbeddings # type: ignore
-from langchain_community.embeddings import OpenAIEmbeddings # type: ignore
 from langchain.schema import Document # type: ignore
 from requests.exceptions import ChunkedEncodingError # type: ignore
+
+from docx import Document as DocxDoc# type: ignore
 
 
 import numpy as np # type: ignore
@@ -16,25 +16,33 @@ from .utils import *
 from .GPT.openai import Openai_Client
 from .GPT.llama import Llama_Client
 from .GPT.client import GPT_Client
+from .Embedding.embedding_client import Embedding_Client
+from .Embedding.llama import Llama_Embeddings
+from .Embedding.openai import Openai_Embeddings
 
 class EchoWeave:
-    def __init__(self, apikey):
+    def __init__(self):
         self.graph = nx.DiGraph()
         self.files = []
         self.entry_points = []
-        self.embedding_model = OpenAIEmbeddings(model="text-embedding-ada-002", openai_api_key=apikey)
+        self.embedding_model = Embedding_Client()
         self.keep_old_nodes = True
         self.client = GPT_Client()
+        self.embedding_size = None
 
     def set_api_key(self, apikey):
         self.api_key = apikey
         #os.environ['OPENAI_API_KEY'] = apikey
         self.client.set_api_key(apikey)
-        self.embedding_model.openai_api_key=apikey
+        self.embedding_model.set_api_key(apikey)
 
     def set_client(self, client):
         assert(isinstance(client, Openai_Client) or isinstance(client, Llama_Client), "client is not supported by EchoWeave currently")
         self.client.set_client(client)
+
+    def set_embedding(self, client):
+        assert(isinstance(client, Openai_Embeddings) or isinstance(client, Llama_Embeddings), "Embedding is not supported by EchoWeave currently")
+        self.embedding_model.set_embedding(client)
 
     def __chunk_file(self, file):
         if os.path.splitext(file)[1] == ".pdf":
@@ -54,6 +62,34 @@ class EchoWeave:
                 else:
                     print(f"Skipping entry without 'image' or 'description': {entry}")
             return documents
+        
+        elif os.path.splitext(file)[1] == ".docx":
+            
+            # Load the document
+            doc = DocxDoc(file)
+
+            # Extract all text
+            full_text = []
+            for paragraph in doc.paragraphs:
+                full_text.append(paragraph.text)
+
+            # Join text into a single string
+            text = "\n".join(full_text)
+            tokenizer = GPT2TokenizerFast.from_pretrained("gpt2")
+
+            def count_tokens(text: str) -> int:
+                return len(tokenizer.encode(text))
+
+            # Step 4: Split text into chunks
+            text_splitter = RecursiveCharacterTextSplitter(
+                # Set a really small chunk size, just to show.
+                chunk_size = 1024,
+                chunk_overlap  = 32,
+                length_function = count_tokens,
+            )
+
+            return text_splitter.create_documents([text])
+        
         else:
             with open(file, 'r', encoding='utf-8') as f:
                 text = f.read()
@@ -135,12 +171,12 @@ class EchoWeave:
                     self.graph.nodes[node]['references'].pop(file_node['label'])
                 if len(self.graph.nodes[node]["references"]) == 0:
                     chunks_to_remove.append(node)
-                print(node)
-                print(self.graph.nodes[node]["references"])
+                #print(node)
+                #print(self.graph.nodes[node]["references"])
             chunks_to_remove.append(chunk)
         for chunk in chunks_to_remove:
             n = self.graph.neighbors(chunk)
-            print(f"n = {n}")
+            #print(f"n = {n}")
             self.graph.remove_node(chunk)
             for ni in n:
                 self.remove_invisible_node(ni)
@@ -176,7 +212,9 @@ class EchoWeave:
         size = len(paragraphs)
         kg = []
 
-        summed_embedding = np.empty(1536)
+        summed_embedding = None
+        if self.embedding_size is not None:
+            summed_embedding = np.zeros_like(self.embedding_size)
         #full_text = ""
         for paragraph in paragraphs:
             i += 1
@@ -193,8 +231,13 @@ class EchoWeave:
 
             
             #print(k)
+            if summed_embedding is None:
+                summed_embedding = np.zeros_like(embedding)
+                if self.embedding_size is None:
+                    self.embedding_size = np.zeros_like(embedding)
+            #print(summed_embedding)
             kg.append([k, embedding])
-            summed_embedding = np.add(summed_embedding, embedding)
+            summed_embedding += embedding
         
         # add the OG file to the graph
         self.graph.add_node(path, label=path, type="file", embedding=summed_embedding.tolist())
@@ -274,9 +317,12 @@ class EchoWeave:
                     references[file_name].append(paragraph_number)
                 else:
                     references[file_name] = [paragraph_number]
+                
+                if 'embedding' not in node_data:
+                    node_data['embedding'] = np.zeros_like(self.embedding_size, dtype=float)
 
                 # update embedding to include new chunk
-                node_data['embedding'] = np.add(np.array(node_data['embedding']), np.array(chunk_embedding)).tolist()
+                node_data['embedding'] = np.add(np.array(node_data['embedding'], dtype=float), np.array(chunk_embedding), dtype=float).tolist()
                 # Set the updated references map
                 node_data['references'] = references
             else:
@@ -341,7 +387,7 @@ class EchoWeave:
     def search_chunks_by_embedding(self, embedding, top_k=5):
         chunks = []
         for file in self.files:
-            print(self.graph.neighbors(file))
+            #print(self.graph.neighbors(file))
             for f in self.graph.neighbors(file):
                 chunks.append(f)
         return self.__search(embedding, chunks, top_k)
@@ -381,6 +427,11 @@ class EchoWeave:
         # Sort the nodes by similarity score in descending order
         node_similarities = sorted(node_similarities, key=lambda x: x[1], reverse=True)
         return node_similarities[:top_k]
+    
+
+    def RAG(self, query):
+        docs = self.search_chunks_by_query(query, top_k=1)
+        return self.client.rag_query(query, docs, "")
 # end region
 
     def save_to_file(self, filename):
